@@ -24,19 +24,22 @@
 # Global variables
 
 # SNMPSIM application path
-snmpsimPath="/home/$USER/.local/bin/snmpsimd.py"
+#snmpsimPath="/home/$USER/.local/bin/snmpsimd.py"
+snmpsimPath="/home/$USER/.local/bin/snmpsim-command-responder-lite"
 
 # SNMPSIM Variation module folder path
-snmpsimVariationModulePath="/home/$USER/.local/snmpsim/variation"
+# Since this path depends of the python minor version (3.10.1 -> 10 is the minor version) we move this variable to main method
+#snmpsimVariationModulePath="/home/$USER/.local/snmpsim/variation"
+#snmpsimVariationModulePath="home/$USER/.local/lib/python3.10/site-packages/snmpsim/variation"
 
 # SNMPSIM PID file
-snmpsimPidFilePath="/home/$USER/Documents/snmpsim_debug/daemon/daemon"
+snmpsimPidFilePath="/home/$USER/Documents/snmpsim/debug/daemon/daemon"
 
 # SNMPSIM Log folder
-snmmpsimLogFolder="/home/$USER/Documents/snmpsim_debug/logging/"
+snmmpsimLogFolder="/home/$USER/Documents/snmpsim/debug/logging/"
 
 # SNMPSIM Report folder
-snmpsimReportFolder="/home/$USER/Documents/snmpsim_debug/reports/"
+snmpsimReportFolder="/home/$USER/Documents/snmpsim/debug/reports/"
 
 # Bash script template used: https://github.com/ralish/bash-script-template
 
@@ -159,7 +162,7 @@ function script_exit() {
 		fi
 	fi
 
-	script_exit 'Missing required argument to script_exit()!' 2
+	script_exit '[ERROR]|Missing required argument to script_exit()!' 2
 }
 
 # DESC: Generic script initialisation
@@ -469,13 +472,13 @@ function run_as_root() {
 function script_usage() {
 	cat << EOF
 Usage:
-	 -h|--help              Displays this help
-	 -v|--verbose           Displays verbose output
+	-h|--help              Displays this help
+	-v|--verbose           Displays verbose output
 	-nc|--no-colour         Disables colour output
 	-cr|--cron              Run silently unless we encounter an error
-	 -i|--ipAddress         IP Address of the simulated SNMP agent
-	 -p|--port              The port used by the simulated SNMP agent
-	 -f|--snmprecFolder     The snmprec folder that contains the simulation folder used by the simulated SNMP agent
+	-i|--ipAddress         IP Address of the simulated SNMP agent
+	-p|--port              The port used by the simulated SNMP agent
+	-f|--snmprecFolder     The snmprec folder that contains the simulation folder used by the simulated SNMP agent
 EOF
 }
 
@@ -562,7 +565,6 @@ function parse_params() {
 #  if [[ $? -eq 0 ]]; then echo good; else echo bad; fi
 #  OR
 #  if valid_ip IP_ADDRESS; then echo good; else echo bad; fi
-#
 function valid_ip()
 {
 	local  ip=$1
@@ -593,6 +595,10 @@ function ExecuteSingleSnmpsimSimulation() {
 		exit 0
 	fi
 
+	# Get the major version of python
+	python_version_minor=$((python3 -c 'import platform; major, minor, patch = platform.python_version_tuple(); print(minor)') 2>&1)
+	pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Python Minor Version: $python_version_minor"
+
 	# Check if snmpsim was installed for the user used to execute this script
 	if [[ -f "$snmpsimPath" ]]; then
 		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|File: $snmpsimPath exists"
@@ -600,6 +606,9 @@ function ExecuteSingleSnmpsimSimulation() {
 		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|File: $snmpsimPath does not exist. This Python file is used to execute snmpsim" "$fg_red"
 		exit 0
 	fi
+
+	# Set the path of the variation module
+	snmpsimVariationModulePath="/home/$USER/.local/lib/python3.$python_version_minor/site-packages/snmpsim/variation"
 
 	# Check if folder snmpsimVariationModulePath exists
 	if [[ -d "$snmpsimVariationModulePath" ]]; then
@@ -706,9 +715,9 @@ function ExecuteSingleSnmpsimSimulation() {
 		--pid-file=$snmpsimPidFilePath \
 		--log-level=error \
 		--logging-method=file:$logSimulationFile:10m \
-		--process-user=$USER \
-		--process-group=$USER \
 		--daemonize
+		#--process-user=$USER \
+		#--process-group=$USER \
 
 	pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Check the log file: $logSimulationFile to troubleshoot any error"
 }

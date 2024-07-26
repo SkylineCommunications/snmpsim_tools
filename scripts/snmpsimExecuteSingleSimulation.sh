@@ -23,9 +23,13 @@
 
 # Global variables
 
+# SNMPSIM Command
+snmpsimCommand="snmpsim-command-responder-lite"
+
 # SNMPSIM application path
 #snmpsimPath="/home/$USER/.local/bin/snmpsimd.py"
-snmpsimPath="/home/$USER/.local/bin/snmpsim-command-responder-lite"
+
+snmpsimPath="/home/$USER/.local/bin/$snmpsimCommand"
 
 # SNMPSIM Variation module folder path
 # Since this path depends of the python minor version (3.10.1 -> 10 is the minor version) we move this variable to main method
@@ -40,6 +44,13 @@ snmmpsimLogFolder="/home/$USER/Documents/snmpsim/debug/logging/"
 
 # SNMPSIM Report folder
 snmpsimReportFolder="/home/$USER/Documents/snmpsim/debug/reports/"
+
+# Virtual environement
+# We will check if the virtual environment is activate by looking at the value of the variable VIRTUAL_ENV. This value is set whenever the virtual environement is activated.
+# In case it is not activated (before to run this script), the variable will be empty
+# This variable is set whenever we activate the virtual environment. Although there are cases where you can use the virtual environment and not set this variable,
+# for this case we asssume that a user will always activate the virtual environment using the script .venv/bin/activate
+pythonVirtualEnvironment=$VIRTUAL_ENV
 
 # Bash script template used: https://github.com/ralish/bash-script-template
 
@@ -589,7 +600,7 @@ function ExecuteSingleSnmpsimSimulation() {
 
 	# Check if Python is installed
 	if [[ "$(python3 -V)" =~ "Python 3" ]]; then
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Python is installed"
+		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Python 3 is installed"
 	else
 		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|Python is not installed. SNMPSIM requires Python 3.x to run" "$fg_red"
 		exit 0
@@ -599,20 +610,36 @@ function ExecuteSingleSnmpsimSimulation() {
 	python_version_minor=$((python3 -c 'import platform; major, minor, patch = platform.python_version_tuple(); print(minor)') 2>&1)
 	pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Python Minor Version: $python_version_minor"
 
+	# Check if there is a virtual envirnment activated
+	if [[ -z "$pythonVirtualEnvironment" ]]; then
+		
+		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Python environment is not activated. We will use the local environment"
+
+		# Set the path of the variation module
+		snmpsimVariationModulePath="/home/$USER/.local/lib/python3.$python_version_minor/site-packages/snmpsim/variation"
+
+		# We don't set the snmpsimpath since it is already defined
+	else
+		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Python environment is activated. Path:$pythonVirtualEnvironment"
+
+		# Set the path of the Variation module
+		snmpsimVariationModulePath="$pythonVirtualEnvironment/lib/python3.$python_version_minor/site-packages/snmpsim/variation"
+
+		# Set the path of snmpsim
+		snmpsimPath="$pythonVirtualEnvironment/bin/$snmpsimCommand"
+	fi
+
 	# Check if snmpsim was installed for the user used to execute this script
 	if [[ -f "$snmpsimPath" ]]; then
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|File: $snmpsimPath exists"
+		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|File: $snmpsimPath exists" 
 	else
 		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|File: $snmpsimPath does not exist. This Python file is used to execute snmpsim" "$fg_red"
 		exit 0
 	fi
 
-	# Set the path of the variation module
-	snmpsimVariationModulePath="/home/$USER/.local/lib/python3.$python_version_minor/site-packages/snmpsim/variation"
-
 	# Check if folder snmpsimVariationModulePath exists
 	if [[ -d "$snmpsimVariationModulePath" ]]; then
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Folder: $snmpsimVariationModulePath exists"
+		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Folder: $snmpsimVariationModulePath exists" 
 	else
 		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|Folder: $snmpsimVariationModulePath does not exist. This folder contains the Variation modules used by snmpsim to generate dynamic values in the simulation" "$fg_red"
 		exit 0
@@ -644,9 +671,9 @@ function ExecuteSingleSnmpsimSimulation() {
 
 	# Validate the port number
 	if [[ "$portValue" =~ ^[0-9]+$ ]]; then
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Port number: $portValue validated"
+		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Port Number: $portValue validated"
 	else
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Port number: $portValue not valid" "$fg_red"
+		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Port Number: $portValue not valid" "$fg_red"
 		exit 0
 	fi
 
@@ -654,11 +681,11 @@ function ExecuteSingleSnmpsimSimulation() {
 	# The main reason of this constraint is to avoid running snmpsim as root
 	# Using port lower than 1024 implies running snmpsim as root
 	if [[ $portValue -gt 65535 ]] || [[ $portValue -lt 1024 ]]; then
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Port number: $portValue is not in the range [1024,65535]" "$fg_red"
+		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Port Number: $portValue is not in the range [1024,65535]" "$fg_red"
 		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|This is required to run snmpsim without root privileges" "$fg_red"
 		exit 0
 	else
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Port number: $portValue is in the range [1024, 65535]"
+		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Port Number: $portValue is in the range [1024, 65535]"
 	fi
 
 	# Check if there is a snmpsim process already using the IP address:Port passed as argument
@@ -707,17 +734,18 @@ function ExecuteSingleSnmpsimSimulation() {
 	fi
 
 	# Execute the SNMPSIM command
-	/usr/bin/python3 $snmpsimPath \
+	#/usr/bin/python3 $snmpsimPath \
+	$snmpsimPath \
 		--agent-udpv4-endpoint=$ipAddressValue:$portValue \
 		--data-dir=$snmprecFolderPathValue \
 		--variation-modules-dir=$snmpsimVariationModulePath \
 		--v2c-arch \
 		--pid-file=$snmpsimPidFilePath \
 		--log-level=error \
-		--logging-method=file:$logSimulationFile:10m \
+		--logging-method=file:$logSimulationFile:100m \
 		--daemonize
-		#--process-user=$USER \
-		#--process-group=$USER \
+		#--process-user=$user \
+		#--process-group=$user \
 
 	pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Check the log file: $logSimulationFile to troubleshoot any error"
 }
@@ -745,7 +773,6 @@ function main() {
 	else
 		pretty_print "[ERROR]|Main|Not all the mandatory arguments were provided" "$fg_red"
 		pretty_print "[ERROR]|Main|The following arguments are mandatory:" "$fg_red"
-		pretty_print "shortVersion|LongVersion:" "$fg_red"
 		pretty_print "-f|--snmprecFolder" "$fg_red"
 		pretty_print "-i|--ipAddress" "$fg_red"
 		pretty_print "-p|--port" "$fg_red"

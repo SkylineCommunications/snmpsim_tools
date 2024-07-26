@@ -52,4 +52,5 @@ snmpsimExecuteSingleSimulation.sh -f /home/myUser/mySnmprecFolder -i 10.11.12.13
 ```
 
 >[!IMPORTANT]
-> It is recommended to install the necesarry libraries in a virtual environment.
+> - Currently `snmpsim-command-responder-lite` is hard-coded in the bash script. This command is recommended for SNMPv2 simulations. For SNMPv3 simulations, it is better to use `snmpsim-command-responder`
+> - It is recommended to install the necessary libraries in a virtual environment

@@ -34,6 +34,10 @@ The generated file (in this case, **convertedSimulation.snmprec**) does not need
 In this case *&#x0* represents char(0) which is not valid in an XML document. This could be a consequence of a decoding issue (the QA Device simulator is decoding incorrectly a value retrieved by the device)
 To surpass this constraint, this tool creates a temporary XML file containing the same information as the original XML file without the invalid characters.
 
+## SNMP walk to SNMPSIM
+
+This script will convert a SNMP walk (took by Net-SNMP tools) to a snmprec format (used by SNMPSIM)
+
 ## SNMPSIM Execute Single Simulation
 
 The purpose of this bash script is to reduce the number of argument that are required to execute SNMPSIM to simulate a single SNMP agent.

@@ -17,40 +17,39 @@
 # i|ipAddress: The IP address of the simulated SNMP agent
 # p|Port: The port port of the simulated SNMP agent
 #
+# Optional arguments:
+# l|lite: Use snmpsim-command-responder-lite (SNMPv1/v2c only) instead of snmpsim-command-responder
+# m|variationModulesFolder: Folder with the snmpsim variation modules. By default the modules installed with snmpsim are used
+#
 # Version history:
 # 1.0.1, Miguel Obregon, Initial version
+# 1.1.0, Use snmpsim-command-responder by default (the lite responder does not start with snmpsim 1.2.x), one PID file and
+#        log file per simulation, optional variation modules folder, non-zero exit code on errors
 # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 # Global variables
 
-# SNMPSIM Command
-snmpsimCommand="snmpsim-command-responder-lite"
+# SNMPSIM Commands
+# snmpsim-command-responder supports SNMPv1/v2c/v3 and works with snmpsim-lextudio 1.1.x and snmpsim 1.2.x
+# snmpsim-command-responder-lite supports SNMPv1/v2c only and does not start with snmpsim 1.2.x (used with --lite)
+snmpsimCommandFull="snmpsim-command-responder"
+snmpsimCommandLite="snmpsim-command-responder-lite"
 
-# SNMPSIM application path
-#snmpsimPath="/home/$USER/.local/bin/snmpsimd.py"
+# SNMPSIM debug folder. It contains a PID file and a log file for each simulation
+snmpsimDebugFolder="$HOME/Documents/snmpsim/debug"
 
-snmpsimPath="/home/$USER/.local/bin/$snmpsimCommand"
-
-# SNMPSIM Variation module folder path
-# Since this path depends of the python minor version (3.10.1 -> 10 is the minor version) we move this variable to main method
-#snmpsimVariationModulePath="/home/$USER/.local/snmpsim/variation"
-#snmpsimVariationModulePath="home/$USER/.local/lib/python3.10/site-packages/snmpsim/variation"
-
-# SNMPSIM PID file
-snmpsimPidFilePath="/home/$USER/Documents/snmpsim/debug/daemon/daemon"
+# SNMPSIM PID folder
+snmpsimPidFolder="$snmpsimDebugFolder/daemon"
 
 # SNMPSIM Log folder
-snmmpsimLogFolder="/home/$USER/Documents/snmpsim/debug/logging/"
-
-# SNMPSIM Report folder
-snmpsimReportFolder="/home/$USER/Documents/snmpsim/debug/reports/"
+snmpsimLogFolder="$snmpsimDebugFolder/logging"
 
 # Virtual environement
 # We will check if the virtual environment is activate by looking at the value of the variable VIRTUAL_ENV. This value is set whenever the virtual environement is activated.
 # In case it is not activated (before to run this script), the variable will be empty
 # This variable is set whenever we activate the virtual environment. Although there are cases where you can use the virtual environment and not set this variable,
 # for this case we asssume that a user will always activate the virtual environment using the script .venv/bin/activate
-pythonVirtualEnvironment=$VIRTUAL_ENV
+pythonVirtualEnvironment=${VIRTUAL_ENV-}
 
 # Bash script template used: https://github.com/ralish/bash-script-template
 
@@ -490,6 +489,9 @@ Usage:
 	-i|--ipAddress         IP Address of the simulated SNMP agent
 	-p|--port              The port used by the simulated SNMP agent
 	-f|--snmprecFolder     The snmprec folder that contains the simulation folder used by the simulated SNMP agent
+	-l|--lite              Use snmpsim-command-responder-lite (SNMPv1/v2c only) instead of snmpsim-command-responder
+	-m|--variationModulesFolder
+	                       Folder with snmpsim variation modules (default: the modules installed with snmpsim)
 EOF
 }
 
@@ -527,8 +529,8 @@ function parse_params() {
 						exit 1
 					fi
 				else
-					echo "[ERROR]|parse_params|Argument snmprecFolder incomplete"
-					exit 0
+					echo "[ERROR]|parse_params|Argument snmprecFolder incomplete" >&2
+					exit 1
 				fi
 				snmprecFolder=true
 				;;
@@ -542,8 +544,8 @@ function parse_params() {
 						exit 1
 					fi
 				else
-					echo "[ERROR]|parse_params|Argument ipAddress incomplete"
-					exit 0
+					echo "[ERROR]|parse_params|Argument ipAddress incomplete" >&2
+					exit 1
 				fi
 				ipAddress=true
 				;;
@@ -557,10 +559,23 @@ function parse_params() {
 						exit 1
 					fi
 				else
-					echo "[ERROR]|parse_params|Argument port incomplete"
-					exit 0
+					echo "[ERROR]|parse_params|Argument port incomplete" >&2
+					exit 1
 				fi
 				port=true
+				;;
+			-l|--lite)
+				lite=true
+				shift
+				;;
+			-m|--variationModulesFolder)
+				if [[ $# -gt 1 ]] && [ -n "$2" ] && [ "${2:0:1}" != "-" ]; then
+					variationModulesFolderValue=$2
+					shift 2
+				else
+					echo "[ERROR]|parse_params|Argument variationModulesFolder incomplete" >&2
+					exit 1
+				fi
 				;;
 			*)
 				script_exit "[ERROR]|parse_params|Invalid parameter was provided: $param" 1
@@ -593,114 +608,119 @@ function valid_ip()
 	return $stat
 }
 
+# DESC: Check if a UDP port is already used on an IP address (or on all the IP addresses of the host)
+# ARGS: $1 (required): IP address
+#       $2 (required): Port
+# OUTS: Returns 0 if the port is used, 1 otherwise
+function udp_port_in_use() {
+	local ipAddress=$1
+	local portNumber=$2
+	local address
+
+	if command -v ss > /dev/null 2>&1; then
+		while read -r address; do
+			case "$address" in
+				"$ipAddress:$portNumber"|"0.0.0.0:$portNumber"|"*:$portNumber"|"[::]:$portNumber")
+					return 0
+					;;
+			esac
+		done < <(ss -Hlun "sport = :$portNumber" 2> /dev/null | awk '{print $4}')
+		return 1
+	fi
+
+	# Fallback when ss is not available: look for a snmpsim process using the same endpoint
+	pgrep -f -- "--agent-udpv4-endpoint=$ipAddress:$portNumber" > /dev/null
+}
+
 # DESC: Executes snmpsim to simulate a single SNMP agent
 # ARGS: $@ (optional): Arguments provided to the script
 # OUTS: None
 function ExecuteSingleSnmpsimSimulation() {
 
 	# Check if Python is installed
-	if [[ "$(python3 -V)" =~ "Python 3" ]]; then
+	if [[ "$(python3 -V 2>&1)" =~ "Python 3" ]]; then
 		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Python 3 is installed"
 	else
 		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|Python is not installed. SNMPSIM requires Python 3.x to run" "$fg_red"
-		exit 0
+		exit 1
 	fi
 
-	# Get the major version of python
-	python_version_minor=$((python3 -c 'import platform; major, minor, patch = platform.python_version_tuple(); print(minor)') 2>&1)
-	pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Python Minor Version: $python_version_minor"
+	# Select the SNMPSIM command responder
+	local snmpsimCommand="$snmpsimCommandFull"
+	if [[ -n ${lite-} ]]; then
+		snmpsimCommand="$snmpsimCommandLite"
+	fi
 
-	# Check if there is a virtual envirnment activated
-	if [[ -z "$pythonVirtualEnvironment" ]]; then
-		
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Python environment is not activated. We will use the local environment"
-
-		# Set the path of the variation module
-		snmpsimVariationModulePath="/home/$USER/.local/lib/python3.$python_version_minor/site-packages/snmpsim/variation"
-
-		# We don't set the snmpsimpath since it is already defined
-	else
+	# Find the SNMPSIM command: activated virtual environment, PATH or Python user folder (pip install --user)
+	local snmpsimPath
+	if [[ -n "$pythonVirtualEnvironment" ]]; then
 		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Python environment is activated. Path:$pythonVirtualEnvironment"
-
-		# Set the path of the Variation module
-		snmpsimVariationModulePath="$pythonVirtualEnvironment/lib/python3.$python_version_minor/site-packages/snmpsim/variation"
-
-		# Set the path of snmpsim
 		snmpsimPath="$pythonVirtualEnvironment/bin/$snmpsimCommand"
+	elif command -v "$snmpsimCommand" > /dev/null 2>&1; then
+		snmpsimPath="$(command -v "$snmpsimCommand")"
+	else
+		snmpsimPath="$HOME/.local/bin/$snmpsimCommand"
 	fi
 
 	# Check if snmpsim was installed for the user used to execute this script
-	if [[ -f "$snmpsimPath" ]]; then
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|File: $snmpsimPath exists" 
+	if [[ -x "$snmpsimPath" ]]; then
+		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|File: $snmpsimPath exists"
 	else
-		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|File: $snmpsimPath does not exist. This Python file is used to execute snmpsim" "$fg_red"
-		exit 0
+		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|File: $snmpsimPath does not exist. It is installed with snmpsim (pip install -r requirements.txt)" "$fg_red"
+		exit 1
 	fi
 
-	# Check if folder snmpsimVariationModulePath exists
-	if [[ -d "$snmpsimVariationModulePath" ]]; then
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Folder: $snmpsimVariationModulePath exists" 
-	else
-		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|Folder: $snmpsimVariationModulePath does not exist. This folder contains the Variation modules used by snmpsim to generate dynamic values in the simulation" "$fg_red"
-		exit 0
+	# Optional folder with variation modules (used to generate dynamic values in the simulation).
+	# When it is not provided, snmpsim uses the variation modules installed with it
+	local optionalArguments=()
+	if [[ -n ${variationModulesFolderValue-} ]]; then
+		if [[ -d "$variationModulesFolderValue" ]]; then
+			# snmpsim changes its working directory to / when it runs in the background, so the path must be absolute
+			variationModulesFolderValue=$(realpath -- "$variationModulesFolderValue")
+			pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Folder: $variationModulesFolderValue exists"
+			optionalArguments+=("--variation-modules-dir=$variationModulesFolderValue")
+		else
+			pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|Folder: $variationModulesFolderValue does not exist. This folder contains the Variation modules used by snmpsim to generate dynamic values in the simulation" "$fg_red"
+			exit 1
+		fi
 	fi
 
-	# Check if file snmpsimPidFilePath exists
-	if [[ -f "$snmpsimPidFilePath" ]]; then
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|File: $snmpsimPidFilePath exists"
-	else
-		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|File: $snmpsimPidFilePath does not exist. This file is used to register the PID. Required when executing snmpsim in the background" "$fg_red"
-		exit 0
+	# The lightweight SNMPv1/v2c architecture is only available in the lite command responder
+	if [[ -n ${lite-} ]]; then
+		optionalArguments+=("--v2c-arch")
 	fi
-
-	# Check if file snmmpsimLogFile exists
-	# if [[ -f "$snmmpsimLogFile" ]]; then
-	# 	pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|File: $snmmpsimLogFile exists"
-	# else
-	# 	pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|File: $snmmpsimLogFile does not exist. This file is used to log any errors when executing the simulation file" "$fg_red"
-	# 	exit 0
-	# fi
 
 	# Validate the IP address
-	if (valid_ip $ipAddressValue); then
+	if (valid_ip "$ipAddressValue"); then
 		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|IP Address: $ipAddressValue validated"
 	else
 		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|IP Address: $ipAddressValue not valid" "$fg_red"
-		exit 0
+		exit 1
 	fi
 
 	# Validate the port number
 	if [[ "$portValue" =~ ^[0-9]+$ ]]; then
 		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Port Number: $portValue validated"
 	else
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Port Number: $portValue not valid" "$fg_red"
-		exit 0
+		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|Port Number: $portValue not valid" "$fg_red"
+		exit 1
 	fi
 
 	# Check if the port number is in the range [1024, 65535]
 	# The main reason of this constraint is to avoid running snmpsim as root
 	# Using port lower than 1024 implies running snmpsim as root
 	if [[ $portValue -gt 65535 ]] || [[ $portValue -lt 1024 ]]; then
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Port Number: $portValue is not in the range [1024,65535]" "$fg_red"
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|This is required to run snmpsim without root privileges" "$fg_red"
-		exit 0
+		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|Port Number: $portValue is not in the range [1024,65535]" "$fg_red"
+		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|This is required to run snmpsim without root privileges" "$fg_red"
+		exit 1
 	else
 		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Port Number: $portValue is in the range [1024, 65535]"
 	fi
 
-	# Check if there is a snmpsim process already using the IP address:Port passed as argument
-	# TODO: This command can be improved
-	psOutput=`ps -ef | grep snmpsim`
-	result=$(echo $psOutput)
-
-	if [[ "$result" == *"--agent-udpv4-endpoint=$ipAddressValue:$portValue "* ]]; then
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|There is already a process running snmpsim with IP Address and port: $ipAddressValue:$portValue" "$fg_red"
-		# Get the specific process
-		psOutput=`ps -ef | grep snmpsim | grep $ipAddressValue:$portValue`
-		result=$(echo $psOutput)
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Process found:" "$fg_red"
-		pretty_print "$result" "$fg_red"
-		exit 0
+	# Check if another process (e.g. another simulation) is already using the IP address:Port passed as argument
+	if udp_port_in_use "$ipAddressValue" "$portValue"; then
+		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|UDP port $portValue is already in use on IP address $ipAddressValue" "$fg_red"
+		exit 1
 	else
 		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|IP Address and port available to run this simulation"
 	fi
@@ -710,43 +730,69 @@ function ExecuteSingleSnmpsimSimulation() {
 		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Simulation folder: $snmprecFolderPathValue exists"
 	else
 		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|Simulation folder: $snmprecFolderPathValue does not exist" "$fg_red"
-		exit 0
+		exit 1
 	fi
 
-	# We check if a log simulation file exists for the simulation folder
-	snmprecFolderName=$(basename ${snmprecFolderPathValue})
-	logSimulationFile="$snmmpsimLogFolder$snmprecFolderName.txt"
+	# Each simulation has its own PID file and log file
+	mkdir -p "$snmpsimPidFolder" "$snmpsimLogFolder"
 
-	if [[ -f "$logSimulationFile" ]]; then
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Log for simulation file: $logSimulationFile exists"
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Log for simulation file: $logSimulationFile will be removed"
+	local snmprecFolderName simulationName pidFile logSimulationFile
+	snmprecFolderName=$(basename "$snmprecFolderPathValue")
+	simulationName="${snmprecFolderName}_${ipAddressValue}_${portValue}"
+	pidFile="$snmpsimPidFolder/$simulationName.pid"
+	logSimulationFile="$snmpsimLogFolder/$simulationName.txt"
 
-		# Since there is a simulation file, we will remove it so we can have a new log file
-		rm $logSimulationFile
+	# A new log file is created for each execution
+	pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Log for simulation file: $logSimulationFile will be (re-)created"
+	: > "$logSimulationFile"
 
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Log for simulation file: $logSimulationFile will be re-created"
-		# Create a new file
-		touch $logSimulationFile
-	else
-		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Log for simulation file: $logSimulationFile does not exist. It will created"
-		# There is no log file, we will create a new one
-		touch $logSimulationFile
-	fi
+	# Remove a PID file left by a previous execution that did not stop properly (e.g. kill -9). The endpoint is not
+	# in use (checked above), and the new PID file is written by snmpsim shortly after it starts in the background
+	rm -f "$pidFile"
 
 	# Execute the SNMPSIM command
-	#/usr/bin/python3 $snmpsimPath \
-	$snmpsimPath \
-		--agent-udpv4-endpoint=$ipAddressValue:$portValue \
-		--data-dir=$snmprecFolderPathValue \
-		--variation-modules-dir=$snmpsimVariationModulePath \
-		--v2c-arch \
-		--pid-file=$snmpsimPidFilePath \
+	if ! "$snmpsimPath" \
+		--agent-udpv4-endpoint="$ipAddressValue:$portValue" \
+		--data-dir="$snmprecFolderPathValue" \
+		--pid-file="$pidFile" \
 		--log-level=error \
-		--logging-method=file:$logSimulationFile:100m \
-		--daemonize
-		#--process-user=$user \
-		#--process-group=$user \
+		--logging-method="file:$logSimulationFile:100m" \
+		--daemonize \
+		${optionalArguments[@]+"${optionalArguments[@]}"}; then
+		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|$snmpsimCommand could not be started. Check the log file: $logSimulationFile" "$fg_red"
+		exit 1
+	fi
 
+	# Wait until snmpsim listens on the UDP port. Large simulation files can take some time to be indexed
+	local attempt pid=""
+	for (( attempt = 0; attempt < 60; attempt++ )); do
+		if [[ -s "$pidFile" ]]; then
+			pid=$(< "$pidFile")
+		fi
+
+		if [[ -n "$pid" ]] && ! kill -0 "$pid" 2> /dev/null; then
+			pid=""
+			break
+		fi
+
+		if [[ -n "$pid" ]] && udp_port_in_use "$ipAddressValue" "$portValue"; then
+			break
+		fi
+
+		sleep 0.5
+	done
+
+	if [[ -z "$pid" ]] || ! kill -0 "$pid" 2> /dev/null; then
+		pretty_print "[ERROR]|ExecuteSingleSnmpsimSimulation|The simulation is not running. Check the log file: $logSimulationFile" "$fg_red"
+		exit 1
+	fi
+
+	if ! udp_port_in_use "$ipAddressValue" "$portValue"; then
+		pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|The simulation is still starting (indexing the simulation files)"
+	fi
+
+	pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Simulation running with PID $pid (PID file: $pidFile)"
+	pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|To stop it: kill \$(cat \"$pidFile\")"
 	pretty_print "[INFO]|ExecuteSingleSnmpsimSimulation|Check the log file: $logSimulationFile to troubleshoot any error"
 }
 
@@ -777,7 +823,7 @@ function main() {
 		pretty_print "-i|--ipAddress" "$fg_red"
 		pretty_print "-p|--port" "$fg_red"
 		pretty_print "[ERROR]|Main|Script terminated" "$fg_red"
-		exit 0
+		exit 1
 	fi
 }
 

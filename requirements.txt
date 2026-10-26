@@ -1,0 +1,11 @@
+# Python packages used by the tools of this repository (Python 3.10 or later)
+# - snmpwalk_to_snmpsim.py only needs them to write snmprec files (the cleaned SNMP walk output has no dependencies)
+# - qa_device_simulator_to_snmpsim.py has no dependencies
+# - the bash scripts run the commands installed by snmpsim (e.g. snmpsim-command-responder)
+snmpsim>=1.2.2,<1.3
+
+# snmpsim 1.2.2 imports pysmi but does not install it
+pysmi>=2.0,<3
+
+# Used by snmpsim for SNMPv3 privacy (DES/AES). Without it, SNMPv3 authPriv requests fail with "Decryption error"
+cryptography>=43

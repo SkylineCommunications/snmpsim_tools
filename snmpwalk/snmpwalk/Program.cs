@@ -13,12 +13,16 @@
 // snmpwalk -v=3 -l=noAuthNoPriv -u=neither -m=subtree -Cr=10 localhost 1.3.6.1.2.1.1
 // snmpwalk -v=3 -l=authNoPriv -a=MD5 -A=authentication -u=authen -m=subtree -Cr=10 localhost 1.3.6.1.2.1.1
 // snmpwalk -v=3 -l=authPriv -a=MD5 -A=authentication -x=DES -X=privacyphrase -u=privacy -m=subtree -Cr=10 localhost 1.3.6.1.2.1.1
+// snmpwalk -v=3 -l=authPriv -a=SHA256 -A=authentication -x=AES -X=privacyphrase -u=privacy -m=subtree -Cr=10 localhost 1.3.6.1.2.1.1
+// snmpwalk -c=public -v=2 -p=10161 -f=snmprec -o=device.snmprec localhost 1.3.6.1
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 
 using Lextm.SharpSnmpLib;
 using Lextm.SharpSnmpLib.Messaging;
@@ -39,6 +43,9 @@ namespace SnmpWalk
             int timeout = 1000;
             int retry = 0;
             int maxRepetitions = 10;
+            int port = 161;
+            bool snmprecFormat = false;
+            string outputFile = null;
             Levels level = Levels.Reportable;
             string user = string.Empty;
             string contextName = string.Empty;
@@ -70,9 +77,9 @@ namespace SnmpWalk
                         throw new ArgumentException("no such security mode: " + v);
                     }
                 })
-                .Add("a:", "Authentication method (MD5 or SHA)", delegate (string v) { authentication = v; })
+                .Add("a:", "Authentication method (MD5, SHA, SHA256, SHA384 or SHA512)", delegate (string v) { authentication = v; })
                 .Add("A:", "Authentication passphrase", delegate (string v) { authPhrase = v; })
-                .Add("x:", "Privacy method", delegate (string v) { privacy = v; })
+                .Add("x:", "Privacy method (DES, 3DES, AES, AES192 or AES256, default is DES)", delegate (string v) { privacy = v; })
                 .Add("X:", "Privacy passphrase", delegate (string v) { privPhrase = v; })
                 .Add("u:", "Security name", delegate (string v) { user = v; })
                 .Add("C:", "Context name", delegate (string v) { contextName = v; })
@@ -118,7 +125,31 @@ namespace SnmpWalk
                         throw new ArgumentException("unknown argument: " + v);
                     }
                 })
-                .Add("Cr:", "Max-repetitions (default is 10)", delegate (string v) { maxRepetitions = int.Parse(v); });
+                .Add("Cr:", "Max-repetitions (default is 10)", delegate (string v) { maxRepetitions = int.Parse(v); })
+                .Add("p|port:", "Port of the SNMP agent (default is 161)", delegate (string v)
+                {
+                    port = int.Parse(v);
+                    if (port < 1 || port > 65535)
+                    {
+                        throw new ArgumentException("invalid port: " + v);
+                    }
+                })
+                .Add("f|format:", "Output format: text (default) or snmprec (simulation file used by SNMPSIM)", delegate (string v)
+                {
+                    if (string.Equals(v, "snmprec", StringComparison.OrdinalIgnoreCase))
+                    {
+                        snmprecFormat = true;
+                    }
+                    else if (string.Equals(v, "text", StringComparison.OrdinalIgnoreCase))
+                    {
+                        snmprecFormat = false;
+                    }
+                    else
+                    {
+                        throw new ArgumentException("unknown format: " + v);
+                    }
+                })
+                .Add("o|output:", "Write the result to this file instead of the console", delegate (string v) { outputFile = v; });
 
             if (args.Length == 0)
             {
@@ -131,9 +162,10 @@ namespace SnmpWalk
             {
                 extra = p.Parse(args);
             }
-            catch (OptionException ex)
+            catch (Exception ex) when (ex is OptionException || ex is ArgumentException || ex is FormatException || ex is OverflowException)
             {
-                Console.WriteLine(ex.Message);
+                Console.Error.WriteLine(ex.Message);
+                Environment.ExitCode = 1;
                 return;
             }
 
@@ -143,15 +175,16 @@ namespace SnmpWalk
                 return;
             }
 
-            if (extra.Count < 1 || extra.Count > 2)
+            if (showVersion)
             {
-                Console.WriteLine("invalid variable number: " + extra.Count);
+                Console.WriteLine(Assembly.GetEntryAssembly()?.GetName().Version);
                 return;
             }
 
-            if (showVersion)
+            if (extra.Count < 1 || extra.Count > 2)
             {
-                Console.WriteLine(Assembly.GetEntryAssembly().GetCustomAttribute<AssemblyVersionAttribute>().Version);
+                Console.Error.WriteLine("invalid variable number: " + extra.Count);
+                Environment.ExitCode = 1;
                 return;
             }
 
@@ -170,7 +203,8 @@ namespace SnmpWalk
 
                 if (ip == null)
                 {
-                    Console.WriteLine("invalid host or wrong IP address found: " + extra[0]);
+                    Console.Error.WriteLine("invalid host or wrong IP address found: " + extra[0]);
+                    Environment.ExitCode = 1;
                     return;
                 }
             }
@@ -179,7 +213,7 @@ namespace SnmpWalk
             {
                 ObjectIdentifier test = extra.Count == 1 ? new ObjectIdentifier("1.3.6.1.2.1") : new ObjectIdentifier(extra[1]);
                 IList<Variable> result = new List<Variable>();
-                IPEndPoint receiver = new IPEndPoint(ip, 161);
+                IPEndPoint receiver = new IPEndPoint(ip, port);
                 if (version == VersionCode.V1)
                 {
                     Messenger.Walk(version, receiver, new OctetString(community), test, result, timeout, mode);
@@ -192,64 +226,101 @@ namespace SnmpWalk
                 {
                     if (string.IsNullOrEmpty(user))
                     {
-                        Console.WriteLine("User name need to be specified for v3.");
+                        Console.Error.WriteLine("User name need to be specified for v3.");
+                        Environment.ExitCode = 1;
                         return;
                     }
 
                     IAuthenticationProvider auth = (level & Levels.Authentication) == Levels.Authentication
                         ? GetAuthenticationProviderByName(authentication, authPhrase)
                         : DefaultAuthenticationProvider.Instance;
-                    IPrivacyProvider priv;
-                    if ((level & Levels.Privacy) == Levels.Privacy)
-                    {
-                        if (DESPrivacyProvider.IsSupported)
-                        {
-                            priv = new DESPrivacyProvider(new OctetString(privPhrase), auth);
-                        }
-                        else
-                        {
-                            Console.WriteLine("DES (ECB) is not supported by .NET Core.");
-                            return;
-                        }
-                    }
-                    else
-                    {
-                        priv = new DefaultPrivacyProvider(auth);
-                    }
+                    IPrivacyProvider priv = (level & Levels.Privacy) == Levels.Privacy
+                        ? GetPrivacyProviderByName(privacy, privPhrase, auth)
+                        : new DefaultPrivacyProvider(auth);
 
                     Discovery discovery = Messenger.GetNextDiscovery(SnmpType.GetBulkRequestPdu);
                     ReportMessage report = discovery.GetResponse(timeout, receiver, dump);
                     Messenger.BulkWalk(version, receiver, new OctetString(user), new OctetString(string.IsNullOrWhiteSpace(contextName) ? string.Empty : contextName),  test, result, timeout, maxRepetitions, mode, priv, report);
                 }
 
-                foreach (Variable variable in result)
+                IList<string> lines = snmprecFormat
+                    ? SnmprecFormatter.Format(result, Console.Error)
+                    : result.Select(variable => variable.ToString()).ToList();
+
+                if (string.IsNullOrEmpty(outputFile))
                 {
-                    Console.WriteLine(variable);
+                    foreach (string line in lines)
+                    {
+                        Console.WriteLine(line);
+                    }
+                }
+                else
+                {
+                    // LF line endings and no byte order mark, as expected by SNMPSIM
+                    File.WriteAllText(outputFile, string.Concat(lines.Select(line => line + "\n")), new UTF8Encoding(false));
+                    Console.WriteLine($"{lines.Count} records written to {outputFile}");
                 }
             }
             catch (SnmpException ex)
             {
-                Console.WriteLine(ex);
+                Console.Error.WriteLine(ex);
+                Environment.ExitCode = 1;
             }
             catch (SocketException ex)
             {
-                Console.WriteLine(ex);
+                Console.Error.WriteLine(ex);
+                Environment.ExitCode = 1;
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is IOException || ex is UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine(ex.Message);
+                Environment.ExitCode = 1;
             }
         }
 
         private static IAuthenticationProvider GetAuthenticationProviderByName(string authentication, string phrase)
         {
-            if (authentication.ToUpperInvariant() == "MD5")
+            switch ((authentication ?? string.Empty).ToUpperInvariant())
             {
-                return new MD5AuthenticationProvider(new OctetString(phrase));
+                case "MD5":
+                    return new MD5AuthenticationProvider(new OctetString(phrase));
+                case "SHA":
+                case "SHA1":
+                    return new SHA1AuthenticationProvider(new OctetString(phrase));
+                case "SHA256":
+                    return new SHA256AuthenticationProvider(new OctetString(phrase));
+                case "SHA384":
+                    return new SHA384AuthenticationProvider(new OctetString(phrase));
+                case "SHA512":
+                    return new SHA512AuthenticationProvider(new OctetString(phrase));
+                default:
+                    throw new ArgumentException("unknown authentication method: " + authentication, nameof(authentication));
             }
+        }
 
-            if (authentication.ToUpperInvariant() == "SHA")
+        private static IPrivacyProvider GetPrivacyProviderByName(string privacy, string phrase, IAuthenticationProvider auth)
+        {
+            switch (string.IsNullOrEmpty(privacy) ? "DES" : privacy.ToUpperInvariant())
             {
-                return new SHA1AuthenticationProvider(new OctetString(phrase));
-            }
+                case "DES":
+                    if (!DESPrivacyProvider.IsSupported)
+                    {
+                        throw new NotSupportedException("DES is not supported on this platform.");
+                    }
 
-            throw new ArgumentException("unknown name", nameof(authentication));
+                    return new DESPrivacyProvider(new OctetString(phrase), auth);
+                case "3DES":
+                    return new TripleDESPrivacyProvider(new OctetString(phrase), auth);
+                case "AES":
+                case "AES128":
+                    return new AESPrivacyProvider(new OctetString(phrase), auth);
+                case "AES192":
+                    return new AES192PrivacyProvider(new OctetString(phrase), auth);
+                case "AES256":
+                    return new AES256PrivacyProvider(new OctetString(phrase), auth);
+                default:
+                    throw new ArgumentException("unknown privacy method: " + privacy, nameof(privacy));
+            }
         }
 
         private static void ShowHelp(OptionSet optionSet)

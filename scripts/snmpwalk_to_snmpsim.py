@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 The purpose of this script is to clean up a SNMP walk taken with Net-SNMP tools so it can be used by SNMPSIM.
 The result is written as a cleaned SNMP walk or, when the output file ends with '.snmprec' (or --format snmprec is used),

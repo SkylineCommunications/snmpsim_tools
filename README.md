@@ -29,6 +29,14 @@ pip install -r requirements.txt
 >[!NOTE]
 > On Ubuntu/Debian, the `venv` module is installed with `sudo apt install python3-venv`
 
+## Run the scripts
+
+The scripts are executable. On Linux, run them from their folder, e.g., `./snmpwalk_to_snmpsim.py --help` in the `scripts` folder:
+
+- The Python scripts run with the `python3` found in the PATH, so they use the virtual environment when it is activated. They can also be started with `python3`, e.g., `python3 snmpwalk_to_snmpsim.py --help`
+- All scripts show their options with `--help`
+- When a script has lost its executable permission (e.g., after it was copied from Windows), restore it with `chmod +x`, e.g., `chmod +x snmpwalk_to_snmpsim.py`
+
 ## QA Device Simulator to SNMPSIM
 
 ### About
@@ -40,7 +48,10 @@ This script converts a simulator took from the QA Device Simulator (XML file) to
 For example, if you would like to convert the simulation **qaDeviceSimulation.xml** to the file **convertedSimulation.snmprec**, please proceed as follows:
 
 ```bash
+# Linux
+./qa_device_simulator_to_snmpsim.py --input="/home/myUser/qaDeviceSimulation.xml" --output="/home/myUser/convertedSimulation.snmprec"
 
+# Windows
 qa_device_simulator_to_snmpsim.py --input="C:\MyDirectory\qaDeviceSimulation.xml" --output="C:\MyDirectory\convertedSimulation.snmprec"
 ```
 
@@ -98,10 +109,10 @@ Then convert it:
 
 ```bash
 # Cleaned SNMP walk
-python3 snmpwalk_to_snmpsim.py --input myDevice.walk --output myDevice.snmpwalk
+./snmpwalk_to_snmpsim.py --input myDevice.walk --output myDevice.snmpwalk
 
 # snmprec file
-python3 snmpwalk_to_snmpsim.py --input myDevice.walk --output myDevice.snmprec
+./snmpwalk_to_snmpsim.py --input myDevice.walk --output myDevice.snmprec
 ```
 
 The script lists the records that were changed or removed. It exits with code 0 when the file was generated and with code 1 otherwise.
@@ -124,8 +135,8 @@ Optional arguments:
 ### How to use
 
 ```bash
-snmpsimExecuteSingleSimulation.sh --snmprecFolder /home/myUser/mySnmprecFolder --ipAddress 10.11.12.13 --port 10161
-snmpsimExecuteSingleSimulation.sh -f /home/myUser/mySnmprecFolder -i 10.11.12.13 -p 10161
+./snmpsimExecuteSingleSimulation.sh --snmprecFolder /home/myUser/mySnmprecFolder --ipAddress 10.11.12.13 --port 10161
+./snmpsimExecuteSingleSimulation.sh -f /home/myUser/mySnmprecFolder -i 10.11.12.13 -p 10161
 ```
 
 The SNMP community is the name of the simulation file (e.g. *myDevice* for *myDevice.snmprec*).
@@ -153,8 +164,8 @@ These bash scripts run one snmpsim instance for each IP address available in a f
 ### How to use
 
 ```bash
-snmpsimBulkv2.sh [options] fileName initialTransportOffset
-snmpsimBulkv3.sh [options] fileName initialTransportOffset
+./snmpsimBulkv2.sh [options] fileName initialTransportOffset
+./snmpsimBulkv3.sh [options] fileName initialTransportOffset
 ```
 
 - fileName: File with one IP address (or IP address:port) per line. Empty lines and lines starting with # are ignored

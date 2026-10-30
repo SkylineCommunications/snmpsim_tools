@@ -1,0 +1,4 @@
+# The scripts are executed directly on Linux (e.g., ./snmpwalk_to_snmpsim.py), which requires LF line endings.
+# Keep LF in the repository and in the working tree, also when the scripts are edited on Windows.
+*.sh text eol=lf
+*.py text eol=lf

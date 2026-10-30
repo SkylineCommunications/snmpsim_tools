@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """qa_device_simulator_to_snmpsim.py: Convert simulations took from QA Device Simulator (XML file extension) to snmpsim simulations (snmprec extension)"""
 

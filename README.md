@@ -199,11 +199,3 @@ More information:
 
 - [container/README.md](container/README.md): build and run an image with Podman, and details of the image (e.g., SNMPv3 settings)
 - [container/kubernetes/README.md](container/kubernetes/README.md): deploy an image on a Kubernetes cluster without a container registry (export the image, import it on the nodes, create the manifest, update a simulation)
-
-## Tests
-
-The Python scripts have unit tests. The tests that need snmpsim are skipped when it is not installed.
-
-```bash
-python3 -m unittest discover -s tests
-```

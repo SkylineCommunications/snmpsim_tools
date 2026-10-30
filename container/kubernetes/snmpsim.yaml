@@ -1,0 +1,92 @@
+# SNMP agent simulator (snmpsim) running the image localhost/my_device:1.0.0, built with build.sh.
+# snmpsim.yaml is a template: README.md (same folder) describes how to create the manifest of a device from it.
+#
+# SNMP managers outside the cluster (e.g., DataMiner) poll <IP of any node>:30161/udp with the SNMP community "public".
+#
+# The image is not in a registry: import my_device_1.0.0.tar on every node that can run the pod
+# (or on one node and set the nodeSelector below). The runtime of a node is shown by "kubectl get nodes -o wide":
+#   containerd: sudo ctr -n k8s.io images import my_device_1.0.0.tar
+#   k3s:        sudo k3s ctr images import my_device_1.0.0.tar
+#   CRI-O:      sudo podman load -i my_device_1.0.0.tar
+#
+# Deploy and test:
+#   kubectl apply -n <namespace> -f my_device.yaml
+#   snmpget -v2c -c public <node-ip>:30161 1.3.6.1.2.1.1.1.0
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: snmpsim-my-device
+  labels:
+    app.kubernetes.io/name: snmpsim
+    app.kubernetes.io/instance: my-device
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: snmpsim
+      app.kubernetes.io/instance: my-device
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: snmpsim
+        app.kubernetes.io/instance: my-device
+    spec:
+      # Only needed when the image is imported on a single node
+      # nodeSelector:
+      #   kubernetes.io/hostname: <node-name>
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: snmpsim
+          image: localhost/my_device:1.0.0
+          # The image is imported on the nodes, there is nothing to pull: a node without it reports ErrImageNeverPull
+          imagePullPolicy: Never
+          ports:
+            - name: snmp
+              containerPort: 1161
+              protocol: UDP
+          # No probes: Kubernetes cannot probe UDP, and the container restarts when snmpsim exits
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # snmpsim builds an index of the simulation file in /tmp/snmpsim at every start
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            # The index is a few times larger than the simulation file
+            sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: snmpsim-my-device
+  labels:
+    app.kubernetes.io/name: snmpsim
+    app.kubernetes.io/instance: my-device
+spec:
+  # nodePort must be free and inside the NodePort range of the cluster (default 30000-32767).
+  # With a load balancer in the cluster (MetalLB, kube-vip, cloud...), "type: LoadBalancer" adds an external IP on port 161.
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: snmpsim
+    app.kubernetes.io/instance: my-device
+  ports:
+    - name: snmp
+      protocol: UDP
+      port: 161
+      targetPort: snmp
+      nodePort: 30161

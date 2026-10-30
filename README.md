@@ -11,6 +11,7 @@ SNMPSIM is open source command line tool (running on Python) that can be used to
 | [snmpsimExecuteSingleSimulation.sh](scripts/snmpsimExecuteSingleSimulation.sh) | Run a single simulated SNMP agent |
 | [snmpsimBulkv2.sh / snmpsimBulkv3.sh](scripts/snmpsimBulk) | Run simulated SNMP agents for a list of IP addresses (SNMPv2c / SNMPv3) |
 | [snmpwalk](snmpwalk/README.md) | C# console application that takes SNMP walks (SNMPv1/v2c/v3), also directly as a snmprec file |
+| [container](container/README.md) | Container image (Podman) that runs one simulated SNMP agent, also on Kubernetes |
 
 ## Requirements
 
@@ -178,6 +179,26 @@ sudo ./snmpsimBulkv2.sh ipAddresses.txt 1
 ```
 
 The script exits with code 0 when all the instances are running.
+
+## SNMPSIM Container
+
+The [container](container/README.md) folder contains the files to build a container image that runs one simulated SNMP agent. The simulation file is copied into the image, so the image runs without any other file: with Podman on a Linux host, or on a Kubernetes cluster. Only Podman is needed, as Python and snmpsim are part of the image.
+
+For example, to simulate the device of **my_device.snmprec** on UDP port 10161:
+
+```bash
+cd container
+mkdir -p data
+cp ~/my_device.snmprec data/
+./build.sh data/my_device.snmprec my_device:1.0.0
+./run.sh my_device:1.0.0 10161
+snmpget -v2c -c public localhost:10161 1.3.6.1.2.1.1.1.0
+```
+
+More information:
+
+- [container/README.md](container/README.md): build and run an image with Podman, and details of the image (e.g., SNMPv3 settings)
+- [container/kubernetes/README.md](container/kubernetes/README.md): deploy an image on a Kubernetes cluster without a container registry (export the image, import it on the nodes, create the manifest, update a simulation)
 
 ## Tests
 

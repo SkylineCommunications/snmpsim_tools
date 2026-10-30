@@ -1,0 +1,56 @@
+# SNMP agent simulator (snmpsim) serving one simulation file, which is baked into the image.
+#
+# Build (or use ./build.sh):
+#   podman build --build-arg SIMULATION_FILE=data/cmts01.snmprec -t cmts01 .
+
+# Fully qualified name: Podman does not silently assume docker.io for short names like "python".
+# Python 3.12 on purpose: Python 3.13 made dbm.sqlite3 the default dbm backend, which commits every write
+# separately and syncs it to disk. snmpsim builds its index (one write per record) at every container start,
+# before it answers: the 3247 records of cmts01.snmprec took ~60 s on 3.13 and 0.06 s on 3.12 (dbm.gnu).
+# How much slower it gets depends on the fsync latency of the disk.
+#   https://docs.python.org/3/whatsnew/3.13.html#dbm
+#   https://github.com/lextudio/snmpsim/pull/19
+FROM docker.io/library/python:3.12-slim
+
+# Fixed non-root UID/GID, so Kubernetes can enforce runAsNonRoot
+ARG UID=10001
+ARG GID=10001
+
+ENV PYTHONUNBUFFERED=1
+
+# Define working directory
+WORKDIR /usr/src/app
+
+# Install the tool (snmpsim) with pinned versions
+COPY requirements.txt .
+RUN pip install --no-cache-dir --disable-pip-version-check --root-user-action=ignore -r requirements.txt
+
+# Add the user that runs the SNMP agent and create the folder structure:
+#   ./data    -> simulation files
+#   ./logging -> optional log files (only used when overriding --logging-method to file:...)
+RUN groupadd --gid ${GID} snmpsim \
+    && useradd --uid ${UID} --gid ${GID} --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin snmpsim \
+    && mkdir -p ./data ./logging \
+    && chown ${UID}:${GID} ./logging
+
+# Simulation file to serve, relative to the build context (e.g. data/device.snmprec); its name does not matter.
+# Declared here instead of at the top, so all layers above are shared by the images of every device.
+ARG SIMULATION_FILE
+RUN test -n "$SIMULATION_FILE" || { echo "ERROR: --build-arg SIMULATION_FILE=<path of the .snmprec file> is required" >&2; exit 1; }
+
+# snmpsim uses the file name as SNMP community, so the agent answers to the default community "public"
+COPY --chmod=0644 ["${SIMULATION_FILE}", "./data/public.snmprec"]
+
+LABEL org.opencontainers.image.description="SNMP agent simulator (snmpsim) serving ${SIMULATION_FILE} with community public"
+
+USER ${UID}:${GID}
+
+# A non-root process cannot bind ports below 1024, so the agent listens on 1161/udp inside the container.
+# Map it at run time, e.g. "-p 10161:1161/udp" (Podman) or a Service with port 161 -> targetPort 1161 (Kubernetes).
+EXPOSE 1161/udp
+
+# Python running as PID 1 ignores SIGTERM; snmpsim shuts down cleanly on SIGINT
+STOPSIGNAL SIGINT
+
+# Logs go to stdout so they are available through "podman logs" / "kubectl logs"
+CMD ["snmpsim-command-responder", "--agent-udpv4-endpoint", "0.0.0.0:1161", "--data-dir", "/usr/src/app/data", "--logging-method", "stdout", "--log-level", "info"]

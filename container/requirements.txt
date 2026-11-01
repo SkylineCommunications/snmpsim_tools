@@ -1,7 +1,7 @@
 # Pinned versions for a reproducible image (an unpinned "pip install snmpsim" broke with 1.2.2).
 snmpsim==1.2.2
 pysnmp==7.1.30
-pyasn1==0.6.4
+pyasn1==0.6.5
 
 # snmpsim 1.2.2 imports these at runtime but does not declare them as dependencies
 # (see https://github.com/lextudio/snmpsim/pull/16):

@@ -11,6 +11,7 @@ SNMPSIM is open source command line tool (running on Python) that can be used to
 | [snmpsimExecuteSingleSimulation.sh](scripts/snmpsimExecuteSingleSimulation.sh) | Run a single simulated SNMP agent |
 | [snmpsimBulkv2.sh / snmpsimBulkv3.sh](scripts/snmpsimBulk) | Run simulated SNMP agents for a list of IP addresses (SNMPv2c / SNMPv3) |
 | [snmpwalk](snmpwalk/README.md) | C# console application that takes SNMP walks (SNMPv1/v2c/v3), also directly as a snmprec file |
+| [container](container/README.md) | Container image (Podman) that runs one simulated SNMP agent, also on Kubernetes |
 
 ## Requirements
 
@@ -28,6 +29,14 @@ pip install -r requirements.txt
 >[!NOTE]
 > On Ubuntu/Debian, the `venv` module is installed with `sudo apt install python3-venv`
 
+## Run the scripts
+
+The scripts are executable. On Linux, run them from their folder, e.g., `./snmpwalk_to_snmpsim.py --help` in the `scripts` folder:
+
+- The Python scripts run with the `python3` found in the PATH, so they use the virtual environment when it is activated. They can also be started with `python3`, e.g., `python3 snmpwalk_to_snmpsim.py --help`
+- All scripts show their options with `--help`
+- When a script has lost its executable permission (e.g., after it was copied from Windows), restore it with `chmod +x`, e.g., `chmod +x snmpwalk_to_snmpsim.py`
+
 ## QA Device Simulator to SNMPSIM
 
 ### About
@@ -39,7 +48,10 @@ This script converts a simulator took from the QA Device Simulator (XML file) to
 For example, if you would like to convert the simulation **qaDeviceSimulation.xml** to the file **convertedSimulation.snmprec**, please proceed as follows:
 
 ```bash
+# Linux
+./qa_device_simulator_to_snmpsim.py --input="/home/myUser/qaDeviceSimulation.xml" --output="/home/myUser/convertedSimulation.snmprec"
 
+# Windows
 qa_device_simulator_to_snmpsim.py --input="C:\MyDirectory\qaDeviceSimulation.xml" --output="C:\MyDirectory\convertedSimulation.snmprec"
 ```
 
@@ -97,10 +109,10 @@ Then convert it:
 
 ```bash
 # Cleaned SNMP walk
-python3 snmpwalk_to_snmpsim.py --input myDevice.walk --output myDevice.snmpwalk
+./snmpwalk_to_snmpsim.py --input myDevice.walk --output myDevice.snmpwalk
 
 # snmprec file
-python3 snmpwalk_to_snmpsim.py --input myDevice.walk --output myDevice.snmprec
+./snmpwalk_to_snmpsim.py --input myDevice.walk --output myDevice.snmprec
 ```
 
 The script lists the records that were changed or removed. It exits with code 0 when the file was generated and with code 1 otherwise.
@@ -123,8 +135,8 @@ Optional arguments:
 ### How to use
 
 ```bash
-snmpsimExecuteSingleSimulation.sh --snmprecFolder /home/myUser/mySnmprecFolder --ipAddress 10.11.12.13 --port 10161
-snmpsimExecuteSingleSimulation.sh -f /home/myUser/mySnmprecFolder -i 10.11.12.13 -p 10161
+./snmpsimExecuteSingleSimulation.sh --snmprecFolder /home/myUser/mySnmprecFolder --ipAddress 10.11.12.13 --port 10161
+./snmpsimExecuteSingleSimulation.sh -f /home/myUser/mySnmprecFolder -i 10.11.12.13 -p 10161
 ```
 
 The SNMP community is the name of the simulation file (e.g. *myDevice* for *myDevice.snmprec*).
@@ -152,8 +164,8 @@ These bash scripts run one snmpsim instance for each IP address available in a f
 ### How to use
 
 ```bash
-snmpsimBulkv2.sh [options] fileName initialTransportOffset
-snmpsimBulkv3.sh [options] fileName initialTransportOffset
+./snmpsimBulkv2.sh [options] fileName initialTransportOffset
+./snmpsimBulkv3.sh [options] fileName initialTransportOffset
 ```
 
 - fileName: File with one IP address (or IP address:port) per line. Empty lines and lines starting with # are ignored
@@ -179,10 +191,22 @@ sudo ./snmpsimBulkv2.sh ipAddresses.txt 1
 
 The script exits with code 0 when all the instances are running.
 
-## Tests
+## SNMPSIM Container
 
-The Python scripts have unit tests. The tests that need snmpsim are skipped when it is not installed.
+The [container](container/README.md) folder contains the files to build a container image that runs one simulated SNMP agent. The simulation file is copied into the image, so the image runs without any other file: with Podman on a Linux host, or on a Kubernetes cluster. Only Podman is needed, as Python and snmpsim are part of the image.
+
+For example, to simulate the device of **my_device.snmprec** on UDP port 10161:
 
 ```bash
-python3 -m unittest discover -s tests
+cd container
+mkdir -p data
+cp ~/my_device.snmprec data/
+./build.sh data/my_device.snmprec my_device:1.0.0
+./run.sh my_device:1.0.0 10161
+snmpget -v2c -c public localhost:10161 1.3.6.1.2.1.1.1.0
 ```
+
+More information:
+
+- [container/README.md](container/README.md): build and run an image with Podman, and details of the image (e.g., SNMPv3 settings)
+- [container/kubernetes/README.md](container/kubernetes/README.md): deploy an image on a Kubernetes cluster without a container registry (export the image, import it on the nodes, create the manifest, update a simulation)

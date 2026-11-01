@@ -1,0 +1,11 @@
+# Simulation files are not part of the repository: they can contain data of real devices
+data/
+*.snmprec
+*.snmpwalk
+
+# Images exported with "podman save" (large files that contain the simulation file)
+*.tar
+
+# Manifests created from the template kubernetes/snmpsim.yaml
+kubernetes/*.yaml
+!kubernetes/snmpsim.yaml
